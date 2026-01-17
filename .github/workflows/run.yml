@@ -23,6 +23,9 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run script
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python collector.py
 
       - name: Commit and Push changes
