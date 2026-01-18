@@ -4,6 +4,23 @@ import gspread
 import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
 
+# 환경 변수 가져오기
+raw_json = os.environ.get('GCP_SERVICE_ACCOUNT')
+
+# 디버깅을 위한 체크
+if not raw_json:
+    print("에러: GCP_SERVICE_ACCOUNT Secrets가 설정되지 않았습니다.")
+    sys.exit(1)
+
+try:
+    SERVICE_ACCOUNT_INFO = json.loads(raw_json)
+except json.JSONDecodeError as e:
+    print(f"에러: JSON 형식이 올바르지 않습니다. 첫 글자 확인: {raw_json[:1]}")
+    print(f"상세 에러: {e}")
+    sys.exit(1)
+
+SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
+
 # 환경 변수에서 설정 로드
 SERVICE_ACCOUNT_INFO = json.loads(os.environ.get('GCP_SERVICE_ACCOUNT'))
 SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
