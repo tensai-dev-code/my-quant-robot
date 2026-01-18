@@ -2,8 +2,10 @@ import os, sys, json
 import FinanceDataReader as fdr
 import gspread
 import pandas as pd
+import google.generativeai as genai
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
+
 
 # 1. 환경 변수 로드
 raw_json = os.environ.get('GCP_SERVICE_ACCOUNT') 
@@ -161,6 +163,34 @@ def calculate_stock_score(row):
         return min(max(total_score, 0), 100)
     except: return 0
 
+def get_ai_opinion(stock_data_list):
+    """Gemini API를 사용하여 종목별 투자 의견 생성"""
+    api_key = os.environ.get('GEMINI_API_KEY')
+    if not api_key:
+        return ["AI 키 설정이 되어있지 않습니다."] * len(stock_data_list)
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash') # 속도와 가성비가 좋은 모델
+
+    opinions = []
+    for _, row in stock_data_list.iterrows():
+        prompt = f"""
+        당신은 전문 주식 분석가입니다. 다음 종목에 대한 짧은 투자 의견(200자 내외)을 작성해주세요.
+        - 종목명: {row['종목명']}
+        - 현재가: {row['현재가']}
+        - 52주 고가: {row['52주고가']} / 저가: {row['52주저가']}
+        - 퀀트 스코어: {row['종합점수']}/100
+        
+        기술적 관점(52주 위치)과 퀀트 점수를 바탕으로 긍정적인 부분과 주의할 점을 한국어로 설명하세요.
+        """
+        try:
+            response = model.generate_content(prompt)
+            opinions.append(response.text.strip())
+        except Exception as e:
+            opinions.append(f"분석 실패: {str(e)}")
+    
+    return opinions
+
 def daily_recommend():
     print("Step 4: 스코어링 기반 종목 추천 시작...")
     history_ws = get_worksheet("수집대상")
@@ -196,25 +226,35 @@ def daily_recommend():
     output_df = recommend_5[['Recommend_Date', 'Code', 'Name', 'Total_Score', 'Close', 'High', 'Low', 'Volume']].copy()
     output_df.columns = ['추천일자', '종목코드', '종목명', '종합점수', '현재가', '52주고가', '52주저가', '거래량']
 
+    # [수정] AI 의견 추가
+    print("Step 5: Gemini AI 분석 의견 생성 중...")
+    output_df['AI분석의견'] = get_ai_opinion(output_df)
+
+    # [수정] 결과 시트 업데이트 (컬럼이 늘어났으므로 확인 필요)
     result_ws = get_worksheet("종목추천")
     if not result_ws.get_all_values():
         result_ws.append_row(output_df.columns.tolist())
     
     result_ws.append_rows(output_df.values.tolist())
-    print(f"성공: {datetime.now().strftime('%Y-%m-%d')} 추천 완료.")
-
-    # [추가] 메일 본문용 HTML 표 생성
-    html_table = output_df.to_html(index=False, justify='center', border=1)
     
-    # 이메일 본문 구성 (HTML)
+    # [수정] 메일 본문용 HTML 표 생성 (너비 조절 추가)
+    html_table = output_df.to_html(index=False, justify='center', border=1, classes='stock-table')
+    
     email_body = f"""
     <html>
+    <head>
+        <style>
+            .stock-table {{ border-collapse: collapse; width: 100%; }}
+            .stock-table th, .stock-table td {{ padding: 8px; text-align: left; border: 1px solid #ddd; }}
+            .stock-table th {{ background-color: #f2f2f2; }}
+        </style>
+    </head>
     <body>
-        <h3 style="color: #2e6c80;">🚀 오늘의 퀀트 추천 종목 (스코어 기반)</h3>
-        <p>52주 최저가 근접도와 우량도 스코어를 종합하여 선정된 종목입니다.</p>
+        <h3 style="color: #2e6c80;">🚀 오늘의 AI 퀀트 추천 종목</h3>
+        <p>Gemini AI가 분석한 오늘의 추천 종목 분석 결과입니다.</p>
         {html_table}
         <br>
-        <p>※ 자세한 분석 데이터는 <a href="https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}">구글 스프레드시트</a>를 확인하세요.</p>
+        <p>※ 상세 데이터: <a href="https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}">구글 스프레드시트</a></p>
     </body>
     </html>
     """
