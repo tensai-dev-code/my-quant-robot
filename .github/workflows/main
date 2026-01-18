@@ -1,0 +1,30 @@
+name: Quant Bot Operations
+
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: '실행할 작업을 선택하세요'
+        required: true
+        default: 'all_stocks'
+        type: choice
+        options:
+          - all_stocks
+          - quant_target
+
+jobs:
+  execute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install finance-datareader gspread oauth2client pandas
+      - name: Run Script
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: python run_bot.py ${{ github.event.inputs.job }}
