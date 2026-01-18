@@ -37,12 +37,22 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # GitHub Secrets에 등록 필수
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python run_bot.py ${{ github.event.inputs.job || 'daily_full_process' }}
-        
-        # [수정된 메일 발송 단계]
+
+      # [중요] 이메일 본문 파일이 생성되었는지 확인하는 단계
+      - name: Check if email body exists
+        id: check_file
+        run: |
+          if [ -f "email_body.html" ]; then
+            echo "should_send=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_send=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Send Mail
-        if: success()
+        # 파일이 있을 때만 메일 발송 실행
+        if: steps.check_file.outputs.should_send == 'true'
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -52,6 +62,5 @@ jobs:
           subject: "🚀 오늘의 퀀트 추천 종목 리스트"
           to: "leedch@gabiacns.com"
           from: "Quant Bot <${{ secrets.EMAIL_USER }}>"
-          # 파일(email_body.html) 내용을 본문으로 사용
           html_body: file://email_body.html
         
