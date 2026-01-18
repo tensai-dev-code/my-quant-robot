@@ -70,10 +70,19 @@ def call_gemini_ai(articles):
     try:
         res = requests.post(url, json=payload)
         result = res.json()
+        
+        # 에러 체크 로직 추가
+        if 'candidates' not in result:
+            print(f"API 응답 에러: {result}")
+            return None
+            
         content = result['candidates'][0]['content']['parts'][0]['text']
-        return content.replace('```html', '').replace('```', '').strip()
+        
+        # 중요: 마크다운 코드 블록 제거 (GAS에서 하신 것과 동일하게)
+        clean_content = content.replace('```html', '').replace('```', '').strip()
+        return clean_content
     except Exception as e:
-        print(f"Gemini API 호출 오류: {e}")
+        print(f"Gemini API 호출 중 예외 발생: {e}")
         return None
 
 if __name__ == "__main__":
