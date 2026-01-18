@@ -76,18 +76,27 @@ def update_quant_target():
         print(f"성공: {len(quant_df)}개 종목 저장 완료.")
 
 def update_yearly_data(is_append=False):
-    """
-    is_append=True 이면 기존 데이터를 지우지 않고 아래에 추가합니다.
-    """
-    print("Step 3: 주가 데이터 수집 중...")
+    target_ws = get_worksheet("수집대상")
+    
+    # 1. 누적 모드일 때, 마지막 수집 날짜 확인
+    if is_append:
+        existing_data = target_ws.get_all_records()
+        if existing_data:
+            last_date = max([row['Date'] for row in existing_data])
+            today_str = datetime.now().strftime('%Y-%m-%d')
+            
+            if last_date >= today_str:
+                print(f"이미 {last_date}까지의 데이터가 시트에 존재합니다. 수집을 건너뜁니다.")
+                return # 함수 종료
+
+    # 2. 수집 대상 종목 가져오기
     quant_ws = get_worksheet("퀀트대상")
     df_quant = pd.DataFrame(quant_ws.get_all_records())
-    
     code_to_name = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Name']))
     target_codes = list(code_to_name.keys())
 
-    # 매일 업데이트용이면 오늘 데이터만, 수동이면 1년치
-    days = 1 if is_append else 365
+    # 3. 날짜 범위 설정
+    days = 2 if is_append else 365 # 누적일 땐 안전하게 최근 2일치 조회
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
@@ -103,49 +112,74 @@ def update_yearly_data(is_append=False):
 
     if all_history:
         final_df = pd.concat(all_history, ignore_index=True)
-        final_df['Date'] = final_df['Date'].dt.strftime('%Y-%m-%d')
-        final_df = final_df.fillna('')
+        # 중복 제거 (데이터 프레임 내에서 한 번 더 체크)
+        final_df = final_df.drop_duplicates(['Date', 'Code'])
         
-        target_ws = get_worksheet("수집대상")
-        
-        # [핵심] 누적 업데이트 로직
         new_data = final_df.values.tolist()
         if not is_append:
             target_ws.clear()
             target_ws.update([final_df.columns.values.tolist()] + new_data)
         else:
-            # 기존 데이터 아래에 추가
             target_ws.append_rows(new_data)
-        print(f"성공: '수집대상' {len(new_data)}건 업데이트 완료.")
+
 
 def daily_recommend():
     """
-    수집대상 데이터를 분석하여 5개 종목을 추천 시트에 누적 기록
+    수집대상 데이터를 분석하여 52주 최저가에 근접한 종목 5개를 추천 시트에 누적 기록
     """
-    print("Step 4: 오늘의 추천 종목 선정 중...")
+    print("Step 4: 52주 최저가 근접 종목 추천 시작...")
     history_ws = get_worksheet("수집대상")
     df = pd.DataFrame(history_ws.get_all_records())
     
-    # 가장 최근 날짜 데이터만 추출
+    if df.empty:
+        print("에러: 수집대상 시트에 데이터가 없습니다.")
+        return
+
+    # 숫자형 변환
+    df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+    df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
+
+    # 1. 종목별 52주 최저가 계산
+    min_prices = df.groupby('Code')['Low'].min().reset_index()
+    min_prices.columns = ['Code', 'Min_52Week']
+
+    # 2. 가장 최근 날짜의 종가 가져오기
     latest_date = df['Date'].max()
     today_df = df[df['Date'] == latest_date].copy()
     
-    # 추천 로직 예시: 거래대금(Volume * Close)이 가장 높은 상위 5개
-    # (원하는 퀀트 전략에 따라 정렬 기준을 변경하세요)
-    today_df['TradeAmount'] = pd.to_numeric(today_df['Close']) * pd.to_numeric(today_df['Volume'])
-    recommend_5 = today_df.sort_values(by='TradeAmount', ascending=False).head(5)
+    # 3. 데이터 병합 (현재가와 최저가 비교)
+    merged = pd.merge(today_df, min_prices, on='Code')
     
-    # 추천 일자 추가
+    # 4. 최저가 대비 근접도 계산 (현재가 / 52주최저가)
+    # 1에 가까울수록 최저가에 붙어 있는 상태
+    merged['Recovery_Rate'] = merged['Close'] / merged['Min_52Week']
+    
+    # 5. 근접도 순으로 정렬하여 상위 5개 추출 (반등 예상 종목)
+    recommend_5 = merged.sort_values(by='Recovery_Rate', ascending=True).head(5)
+
+    # 6. 추천 일자 및 제목 컬럼 정리
     recommend_5['Recommend_Date'] = datetime.now().strftime('%Y-%m-%d')
     
+    # 저장할 컬럼 순서 정의 (제목/헤더 포함)
+    final_cols = ['Recommend_Date', 'Code', 'Name', 'Close', 'Min_52Week', 'Recovery_Rate', 'Volume']
+    recommend_final = recommend_5[final_cols].copy()
+    
+    # 컬럼명 한글로 변경 (시트 가독성용)
+    recommend_final.columns = ['추천일자', '종목코드', '종목명', '현재가', '52주최저가', '최저가대비비율', '거래량']
+
     result_ws = get_worksheet("종목추천")
     
-    # 처음인 경우 헤더 추가, 아니면 데이터만 누적
-    if not result_ws.get_all_values():
-        result_ws.append_row(recommend_5.columns.tolist())
+    # 7. 누적 저장 로직 (기존 데이터가 없으면 헤더부터, 있으면 데이터만 추가)
+    existing_values = result_ws.get_all_values()
     
-    result_ws.append_rows(recommend_5.values.tolist())
-    print(f"성공: {latest_date} 기준 추천 종목 5개 저장 완료.")
+    if not existing_values:
+        # 시트가 비어있으면 헤더(제목컬럼) 포함하여 업데이트
+        result_ws.append_row(recommend_final.columns.tolist())
+    
+    # 데이터 누적 추가 (append_rows)
+    result_ws.append_rows(recommend_final.values.tolist())
+    print(f"성공: {latest_date} 기준 최저가 근접 종목 5개 누적 저장 완료.")
+
 
 if __name__ == "__main__":
     job = sys.argv[1] if len(sys.argv) > 1 else 'daily_full_process'
