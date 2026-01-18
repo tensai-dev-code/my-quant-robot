@@ -1,0 +1,36 @@
+name: Ecommerce Daily News Bot
+
+on:
+  schedule:
+    - cron: '0 23 * * *' # 한국시간 오전 8시 (UTC 23:00)
+  workflow_dispatch:
+
+jobs:
+  news_process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run News Summary
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python news_summarizer.py
+      - name: Send Mail
+        if: hashFiles('news_body.html') != ''
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USER }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "📰 오늘자 이커머스 뉴스 요약 보고서"
+          to: "leedch@gabiacns.com"
+          from: "AI News Curator <${{ secrets.EMAIL_USER }}>"
+          html_body: file://news_body.html
