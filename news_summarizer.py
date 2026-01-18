@@ -85,14 +85,27 @@ def call_gemini_ai(articles):
         print(f"Gemini API 호출 중 예외 발생: {e}")
         return None
 
+# news_summarizer.py 수정 부분
+
 if __name__ == "__main__":
     articles = get_naver_news()
-    if not articles:
-        print("24시간 이내 뉴스가 없습니다.")
-        sys.exit(0)
     
-    summary = call_gemini_ai(articles)
-    if summary:
+    # 1. 뉴스 데이터가 없을 경우 처리
+    if not articles:
+        msg = "<h3>알림</h3><p>최근 24시간 이내에 수집된 이커머스 뉴스가 없습니다.</p>"
         with open("news_body.html", "w", encoding="utf-8") as f:
-            f.write(summary)
-        print("뉴스 요약 완료.")
+            f.write(msg)
+        print("뉴스 없음 - 안내 메시지 생성 완료.")
+    else:
+        # 2. 뉴스 데이터가 있을 경우 요약 진행
+        summary = call_gemini_ai(articles)
+        
+        if summary:
+            with open("news_body.html", "w", encoding="utf-8") as f:
+                f.write(summary)
+            print("뉴스 요약 파일 생성 완료.")
+        else:
+            # Gemini 호출 실패 시 방어 코드
+            with open("news_body.html", "w", encoding="utf-8") as f:
+                f.write("<h3>오류</h3><p>뉴스 요약 중 AI 서버 오류가 발생했습니다.</p>")
+            print("AI 요약 실패 - 에러 메시지 생성 완료.")
