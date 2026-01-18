@@ -37,7 +37,7 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # AI 키 추가
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # GitHub Secrets에 등록 필수
         run: python run_bot.py ${{ github.event.inputs.job || 'daily_full_process' }}
         
         # [수정된 메일 발송 단계]
