@@ -2,7 +2,7 @@ name: Ecommerce Daily News Bot
 
 on:
   schedule:
-    - cron: '0 23 * * *' # 한국시간 오전 8시 (UTC 23:00)
+    - cron: '0 1 * * *' # 한국시간 오전 10시 (UTC 01:00)
   workflow_dispatch:
 
 jobs:
