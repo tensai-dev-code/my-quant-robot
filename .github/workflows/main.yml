@@ -1,17 +1,24 @@
 name: Quant Bot Operations
 
 on:
+  # 1. 월~금 한국시간 오후 6시 자동 실행 설정
+  schedule:
+    - cron: '0 9 * * 1-5' 
+
+  # 2. 수동 실행 옵션 설정
   workflow_dispatch:
     inputs:
       job:
         description: '실행할 작업을 선택하세요'
         required: true
-        default: 'all_stocks'
+        default: 'daily_full_process'
         type: choice
         options:
-          - all_stocks
-          - quant_target
-          - yearly_data
+          - daily_full_process  # 전체 자동 공정 (수집+추출+누적+추천)
+          - all_stocks          # 전체종목 리스트만 갱신
+          - quant_target        # 퀀트대상 250개 추출
+          - yearly_data         # 1년치 상세데이터 초기화 수집
+          - daily_recommend     # 오늘 종목 추천만 실행
 
 jobs:
   execute:
@@ -21,12 +28,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10' # 3.9에서 3.10으로 변경
+          python-version: '3.10'
       - name: Install dependencies
         run: pip install finance-datareader gspread oauth2client pandas
       - name: Run Script
         env:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-        run: python run_bot.py ${{ github.event.inputs.job }}
-        # options에 yearly_data가 추가된 상태여야 합니다.
+        # 수동 실행 시에는 job 선택값을 사용하고, 자동 스케줄러(schedule) 실행 시에는 daily_full_process를 기본값으로 사용함
+        run: python run_bot.py ${{ github.event.inputs.job || 'daily_full_process' }}
