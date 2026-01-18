@@ -10,20 +10,16 @@ raw_json = os.environ.get('GCP_SERVICE_ACCOUNT')
 if not raw_json:
     raw_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
 
-# [추가] SPREADSHEET_ID를 환경 변수에서 가져오는 코드
 SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
 
-if not raw_json:
-    print("에러: 시크릿 데이터를 찾을 수 없습니다.")
-    sys.exit(1)
-if not SPREADSHEET_ID:
-    print("에러: SPREADSHEET_ID가 설정되지 않았습니다.")
+if not raw_json or not SPREADSHEET_ID:
+    print("에러: 환경 변수(Secrets) 설정 확인이 필요합니다.")
     sys.exit(1)
 
 try:
     SERVICE_ACCOUNT_INFO = json.loads(raw_json)
-except json.JSONDecodeError as e:
-    print(f"에러: JSON 형식이 올바르지 않습니다.")
+except json.JSONDecodeError:
+    print("에러: JSON 형식이 올바르지 않습니다.")
     sys.exit(1)
 
 # 2. 구글 시트 연결 함수
@@ -34,24 +30,22 @@ def get_worksheet(sheet_name):
     doc = client.open_by_key(SPREADSHEET_ID)
     return doc.worksheet(sheet_name)
 
-# 3. 전체 종목 업데이트 함수
+# 3. 전체 종목 업데이트
 def update_all_stocks():
     print("Step 1: 전체 종목 수집 중...")
     df = fdr.StockListing('KRX') 
     ws = get_worksheet("전체종목")
     ws.clear()
-    # NaN(결측치) 값을 빈 문자열로 변환해야 구글 시트 업데이트 시 에러가 안 납니다.
     df = df.fillna('')
     ws.update([df.columns.values.tolist()] + df.values.tolist())
     print("성공: '전체종목' 시트 업데이트 완료.")
 
-# 4. 퀀트 대상 추출 함수
+# 4. 퀀트 대상 추출 (250개)
 def update_quant_target():
     print("Step 2: 퀀트 대상 추출 시작 (250개)...")
     all_ws = get_worksheet("전체종목")
     df = pd.DataFrame(all_ws.get_all_records())
     
-    # 숫자형 변환
     numeric_cols = ['Close', 'ChagesRatio', 'Volume', 'Amount', 'Marcap', 'Stocks']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -64,39 +58,34 @@ def update_quant_target():
         (~df['Name'].str.contains('스팩|제[0-9]+호|우$|우[A-C]$'))
     ].copy()
 
-    # 추출 개수를 250개로 하향 조정 (상위 250개)
     quant_df = quant_df.sort_values(by='Amount', ascending=False).head(250)
     
     target_ws = get_worksheet("퀀트대상")
     target_ws.clear()
-    
     if not quant_df.empty:
         quant_df = quant_df.fillna('')
         target_ws.update([quant_df.columns.values.tolist()] + quant_df.values.tolist())
         print(f"성공: {len(quant_df)}개 종목 저장 완료.")
 
+# 5. 주가 데이터 누적 수집
 def update_yearly_data(is_append=False):
     target_ws = get_worksheet("수집대상")
     
-    # 1. 누적 모드일 때, 마지막 수집 날짜 확인
     if is_append:
         existing_data = target_ws.get_all_records()
         if existing_data:
-            last_date = max([row['Date'] for row in existing_data])
+            last_date = max([str(row['Date']) for row in existing_data])
             today_str = datetime.now().strftime('%Y-%m-%d')
-            
             if last_date >= today_str:
-                print(f"이미 {last_date}까지의 데이터가 시트에 존재합니다. 수집을 건너뜁니다.")
-                return # 함수 종료
+                print(f"이미 {last_date}까지 데이터가 존재합니다. 건너뜁니다.")
+                return
 
-    # 2. 수집 대상 종목 가져오기
     quant_ws = get_worksheet("퀀트대상")
     df_quant = pd.DataFrame(quant_ws.get_all_records())
     code_to_name = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Name']))
     target_codes = list(code_to_name.keys())
 
-    # 3. 날짜 범위 설정
-    days = 2 if is_append else 365 # 누적일 땐 안전하게 최근 2일치 조회
+    days = 3 if is_append else 365 # 주말 대비 3일치 수집
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
@@ -112,99 +101,101 @@ def update_yearly_data(is_append=False):
 
     if all_history:
         final_df = pd.concat(all_history, ignore_index=True)
-        
-        # [핵심 수정] 모든 날짜 컬럼을 문자열로 변환 (JSON 에러 방지)
         if 'Date' in final_df.columns:
             final_df['Date'] = final_df['Date'].dt.strftime('%Y-%m-%d')
-            
-        final_df = final_df.fillna('') # NaN 제거
+        final_df = final_df.fillna('')
 
-        target_ws = get_worksheet("수집대상")
         new_data = final_df.values.tolist()
-        
         if not is_append:
             target_ws.clear()
             target_ws.update([final_df.columns.values.tolist()] + new_data)
         else:
-            # append_rows를 사용할 때도 리스트 내의 모든 요소는 문자/숫자여야 함
             target_ws.append_rows(new_data)
         print(f"성공: '수집대상' {len(new_data)}건 업데이트 완료.")
 
+# 6. 신뢰도 높은 스코어링 기반 추천 로직
+def calculate_stock_score(row):
+    try:
+        cur_price = float(row.get('Close', 0))
+        high_52 = float(row.get('High', 0))
+        low_52 = float(row.get('Low', 0))
+        marcap = float(row.get('Marcap', 0))
+        volume = float(row.get('Volume', 0))
+        
+        if marcap <= 0 or cur_price <= 0 or high_52 <= low_52: return 0
+        
+        total_score = 0
+        
+        # 시총 가점 (8)
+        marcap_b = marcap / 100000000
+        if marcap_b >= 10000: m_score = 8
+        elif marcap_b >= 1000: m_score = 8 * (min(marcap_b, 5000) - 1000) / 4000
+        elif marcap_b >= 100: m_score = 2 * (marcap_b - 100) / 900
+        else: m_score = 0
+        total_score += m_score
+
+        # 52주 Position 및 반등 기대 (45)
+        position = min(max((cur_price - low_52) / (high_52 - low_52), 0), 1)
+        if 0.15 <= position <= 0.30: rebound = 40 + 5 * (0.30 - position) / 0.15
+        elif position < 0.15: rebound = 35 - 10 * (0.15 - position)
+        elif position <= 0.50: rebound = 28 + 5 * (0.50 - position) / 0.20
+        else: rebound = 18 - 20 * (position - 0.50)
+        total_score += max(min(rebound, 45), 0)
+
+        # 변동성 패널티
+        volatility = (high_52 - low_52) / low_52
+        if volatility > 2.0: total_score -= 15
+        elif volatility > 1.2: total_score -= 8
+        elif volatility < 0.8: total_score += 6
+
+        # 유동성 (10)
+        total_score += min(volume / 500000 * 10, 10)
+        if volume < 200000: total_score -= 10
+        
+        return min(max(total_score, 0), 100)
+    except: return 0
 
 def daily_recommend():
-    """
-    수집대상 데이터를 분석하여 52주 최저가에 근접한 종목 5개를 추천 시트에 누적 기록
-    """
-    print("Step 4: 52주 최저가 근접 종목 추천 시작...")
+    print("Step 4: 스코어링 기반 종목 추천 시작...")
     history_ws = get_worksheet("수집대상")
     df = pd.DataFrame(history_ws.get_all_records())
-    
-    if df.empty:
-        print("에러: 수집대상 시트에 데이터가 없습니다.")
-        return
+    if df.empty: return
 
-    # 숫자형 변환
-    df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
-    df['Low'] = pd.to_numeric(df['Low'], errors='coerce')
+    # 종목별 52주 고가/저가/현재 데이터 집계
+    agg_df = df.groupby('Code').agg({
+        'High': 'max',
+        'Low': 'min',
+        'Close': 'last',
+        'Marcap': 'last',
+        'Volume': 'last',
+        'Name': 'last',
+        'Date': 'last'
+    }).reset_index()
 
-    # 1. 종목별 52주 최저가 계산
-    min_prices = df.groupby('Code')['Low'].min().reset_index()
-    min_prices.columns = ['Code', 'Min_52Week']
-
-    # 2. 가장 최근 날짜의 종가 가져오기
-    latest_date = df['Date'].max()
-    today_df = df[df['Date'] == latest_date].copy()
+    agg_df['Total_Score'] = agg_df.apply(calculate_stock_score, axis=1)
+    recommend_5 = agg_df.sort_values(by='Total_Score', ascending=False).head(5)
     
-    # 3. 데이터 병합 (현재가와 최저가 비교)
-    merged = pd.merge(today_df, min_prices, on='Code')
-    
-    # 4. 최저가 대비 근접도 계산 (현재가 / 52주최저가)
-    # 1에 가까울수록 최저가에 붙어 있는 상태
-    merged['Recovery_Rate'] = merged['Close'] / merged['Min_52Week']
-    
-    # 5. 근접도 순으로 정렬하여 상위 5개 추출 (반등 예상 종목)
-    recommend_5 = merged.sort_values(by='Recovery_Rate', ascending=True).head(5)
-
-    # 6. 추천 일자 및 제목 컬럼 정리
+    # 결과 정리
     recommend_5['Recommend_Date'] = datetime.now().strftime('%Y-%m-%d')
-    
-    # 저장할 컬럼 순서 정의 (제목/헤더 포함)
-    final_cols = ['Recommend_Date', 'Code', 'Name', 'Close', 'Min_52Week', 'Recovery_Rate', 'Volume']
-    # [핵심 수정] 추천 일자 등 날짜 관련 데이터를 문자열로 확실히 변환
-    recommend_final = recommend_5[final_cols].copy()
-
-    # 만약에 결과에 Timestamp가 섞여있을 수 있으므로 전체 변환
-    for col in recommend_final.columns:
-        if pd.api.types.is_datetime64_any_dtype(recommend_final[col]):
-            recommend_final[col] = recommend_final[col].dt.strftime('%Y-%m-%d')
-    
-    # 컬럼명 한글로 변경 (시트 가독성용)
-    recommend_final.columns = ['추천일자', '종목코드', '종목명', '현재가', '52주최저가', '최저가대비비율', '거래량']
+    output_df = recommend_5[['Recommend_Date', 'Code', 'Name', 'Total_Score', 'Close', 'High', 'Low', 'Volume']].copy()
+    output_df.columns = ['추천일자', '종목코드', '종목명', '종합점수', '현재가', '52주고가', '52주저가', '거래량']
 
     result_ws = get_worksheet("종목추천")
+    if not result_ws.get_all_values():
+        result_ws.append_row(output_df.columns.tolist())
     
-    # 7. 누적 저장 로직 (기존 데이터가 없으면 헤더부터, 있으면 데이터만 추가)
-    existing_values = result_ws.get_all_values()
-    
-    if not existing_values:
-        # 시트가 비어있으면 헤더(제목컬럼) 포함하여 업데이트
-        result_ws.append_row(recommend_final.columns.tolist())
-    
-    # 데이터 누적 추가 (append_rows)
-    result_ws.append_rows(recommend_final.values.tolist())
-    print(f"성공: {latest_date} 기준 최저가 근접 종목 5개 누적 저장 완료.")
+    result_ws.append_rows(output_df.values.tolist())
+    print(f"성공: {datetime.now().strftime('%Y-%m-%d')} 추천 완료.")
 
-
+# 7. 메인 실행부
 if __name__ == "__main__":
     job = sys.argv[1] if len(sys.argv) > 1 else 'daily_full_process'
-    
     if job == 'daily_full_process':
-        # 매일 돌아가는 자동화 사이클
-        update_all_stocks()     # 1. 전체 리스트 갱신
-        update_quant_target()   # 2. 퀀트 250개 추출
-        update_yearly_data(is_append=True) # 3. 오늘치 데이터만 시트에 누적
-        daily_recommend()       # 4. 5개 추천해서 누적
+        update_all_stocks()
+        update_quant_target()
+        update_yearly_data(is_append=True)
+        daily_recommend()
     elif job == 'all_stocks': update_all_stocks()
     elif job == 'quant_target': update_quant_target()
-    elif job == 'yearly_data': update_yearly_data(is_append=False) # 1년치 전체 새로고침
+    elif job == 'yearly_data': update_yearly_data(is_append=False)
     elif job == 'daily_recommend': daily_recommend()
