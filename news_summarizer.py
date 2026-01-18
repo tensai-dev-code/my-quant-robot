@@ -35,7 +35,7 @@ def get_naver_news():
                 items = response.json().get('items', [])
                 for item in items:
                     # 네이버 날짜 형식 변환: "Mon, 06 Jan 2025 14:30:00 +0900"
-                    pub_date = datetime.strptime(item['pub_date'], '%a, %d %b %Y %H:%M:%S +0900')
+                    pub_date = datetime.strptime(item['pubDate'], '%a, %d %b %Y %H:%M:%S +0900')
                     
                     if pub_date >= one_day_ago:
                         title = item['title'].replace('<b>', '').replace('</b>', '').replace('&quot;', '"')
