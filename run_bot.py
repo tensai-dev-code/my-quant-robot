@@ -71,6 +71,15 @@ def update_quant_target():
 def update_yearly_data(is_append=False):
     target_ws = get_worksheet("수집대상")
     
+    # [수정] 퀀트대상에서 시가총액(Marcap) 정보를 미리 가져옴
+    quant_ws = get_worksheet("퀀트대상")
+    df_quant = pd.DataFrame(quant_ws.get_all_records())
+    
+    # 딕셔너리로 코드별 이름과 시총 보관
+    code_to_name = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Name']))
+    code_to_marcap = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Marcap']))
+    target_codes = list(code_to_name.keys())
+
     if is_append:
         existing_data = target_ws.get_all_records()
         if existing_data:
@@ -80,12 +89,7 @@ def update_yearly_data(is_append=False):
                 print(f"이미 {last_date}까지 데이터가 존재합니다. 건너뜁니다.")
                 return
 
-    quant_ws = get_worksheet("퀀트대상")
-    df_quant = pd.DataFrame(quant_ws.get_all_records())
-    code_to_name = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Name']))
-    target_codes = list(code_to_name.keys())
-
-    days = 3 if is_append else 365 # 주말 대비 3일치 수집
+    days = 3 if is_append else 365
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
 
@@ -96,6 +100,8 @@ def update_yearly_data(is_append=False):
             if not df_hist.empty:
                 df_hist['Code'] = code
                 df_hist['Name'] = code_to_name[code]
+                # [추가] 시가총액 정보 추가
+                df_hist['Marcap'] = code_to_marcap.get(code, 0)
                 all_history.append(df_hist)
         except: continue
 
@@ -158,10 +164,21 @@ def calculate_stock_score(row):
 def daily_recommend():
     print("Step 4: 스코어링 기반 종목 추천 시작...")
     history_ws = get_worksheet("수집대상")
-    df = pd.DataFrame(history_ws.get_all_records())
-    if df.empty: return
+    data = history_ws.get_all_records()
+    if not data: return
+    
+    df = pd.DataFrame(data)
+    
+    # [방어 코드] Marcap 컬럼이 아예 없는 경우 0으로 채워진 컬럼 생성
+    if 'Marcap' not in df.columns:
+        df['Marcap'] = 0
 
-    # 종목별 52주 고가/저가/현재 데이터 집계
+    # 숫자형 변환 (집계 전 필수)
+    numeric_cols = ['High', 'Low', 'Close', 'Marcap', 'Volume']
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # 집계 로직
     agg_df = df.groupby('Code').agg({
         'High': 'max',
         'Low': 'min',
@@ -175,7 +192,6 @@ def daily_recommend():
     agg_df['Total_Score'] = agg_df.apply(calculate_stock_score, axis=1)
     recommend_5 = agg_df.sort_values(by='Total_Score', ascending=False).head(5)
     
-    # 결과 정리
     recommend_5['Recommend_Date'] = datetime.now().strftime('%Y-%m-%d')
     output_df = recommend_5[['Recommend_Date', 'Code', 'Name', 'Total_Score', 'Close', 'High', 'Low', 'Volume']].copy()
     output_df.columns = ['추천일자', '종목코드', '종목명', '종합점수', '현재가', '52주고가', '52주저가', '거래량']
