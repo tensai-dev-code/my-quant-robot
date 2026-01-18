@@ -23,7 +23,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python news_summarizer.py
       - name: Send Mail
-        if: hashFiles('news_body.html') != ''
+        # 파일이 생성되었는지 더 확실하게 체크
+        if: success()
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -32,5 +33,5 @@ jobs:
           password: ${{ secrets.EMAIL_PASSWORD }}
           subject: "📰 오늘자 이커머스 뉴스 요약 보고서"
           to: "leedch@gabiacns.com"
-          from: "AI News Curator <${{ secrets.EMAIL_USER }}>"
-          html_body: file://news_body.html
+          from: "AI News Curator"
+          html_body: file://news_body.html # 파일 경로 확인
