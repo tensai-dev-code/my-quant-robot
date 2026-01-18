@@ -3,6 +3,7 @@ import FinanceDataReader as fdr
 import gspread
 import pandas as pd
 import google.generativeai as genai
+import time
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 
@@ -164,30 +165,40 @@ def calculate_stock_score(row):
     except: return 0
 
 def get_ai_opinion(stock_data_list):
-    """Gemini API를 사용하여 종목별 투자 의견 생성"""
+    """Gemini 2.5 Flash-Lite를 사용하여 종목별 투자 의견 생성"""
     api_key = os.environ.get('GEMINI_API_KEY')
     if not api_key:
-        return ["AI 키 설정이 되어있지 않습니다."] * len(stock_data_list)
+        print("경고: GEMINI_API_KEY가 없습니다.")
+        return ["AI 분석을 위해 API 키 설정이 필요합니다."] * len(stock_data_list)
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash') # 속도와 가성비가 좋은 모델
+    
+    # 최신 고성능/저비용 모델인 Gemini 2.5 Flash-Lite 사용
+    model = genai.GenerativeModel('gemini-2.5-flash-lite') 
 
     opinions = []
     for _, row in stock_data_list.iterrows():
+        # 분석의 퀄리티를 높이기 위해 구체적인 페르소나와 제약사항 부여
         prompt = f"""
-        당신은 전문 주식 분석가입니다. 다음 종목에 대한 짧은 투자 의견(200자 내외)을 작성해주세요.
-        - 종목명: {row['종목명']}
-        - 현재가: {row['현재가']}
-        - 52주 고가: {row['52주고가']} / 저가: {row['52주저가']}
-        - 퀀트 스코어: {row['종합점수']}/100
+        당신은 데이터 기반 퀀트 애널리스트입니다. 아래 데이터를 바탕으로 '{row['종목명']}'에 대한 짧고 날카로운 코멘트를 작성하세요.
         
-        기술적 관점(52주 위치)과 퀀트 점수를 바탕으로 긍정적인 부분과 주의할 점을 한국어로 설명하세요.
+        [데이터]
+        - 현재가: {row['현재가']}원
+        - 52주 고가: {row['52주고가']} / 저가: {row['52주저가']}
+        - 거래량: {row['거래량']}
+        - 퀀트 종합점수: {row['종합점수']}/100
+        
+        [지시사항]
+        1. 현재 가격이 52주 범위 중 어디에 위치하는지 분석하세요.
+        2. 퀀트 점수가 높은 이유를 기술적/유동성 측면에서 1문장으로 요약하세요.
+        3. 전체 의견은 한국어로 2~3문장 이내로 작성하세요.
         """
         try:
             response = model.generate_content(prompt)
             opinions.append(response.text.strip())
+            time.sleep(0.5)  # 2.5 Flash-Lite는 빠르지만 안정적인 API 호출을 위해 짧은 대기
         except Exception as e:
-            opinions.append(f"분석 실패: {str(e)}")
+            opinions.append(f"분석 일시 오류: {str(e)}")
     
     return opinions
 
@@ -220,21 +231,22 @@ def daily_recommend():
     }).reset_index()
 
     agg_df['Total_Score'] = agg_df.apply(calculate_stock_score, axis=1)
-    recommend_5 = agg_df.sort_values(by='Total_Score', ascending=False).head(5)
     
+    # 1. 추천 데이터프레임 정리
+    recommend_5 = agg_df.sort_values(by='Total_Score', ascending=False).head(5)
     recommend_5['Recommend_Date'] = datetime.now().strftime('%Y-%m-%d')
+    
     output_df = recommend_5[['Recommend_Date', 'Code', 'Name', 'Total_Score', 'Close', 'High', 'Low', 'Volume']].copy()
     output_df.columns = ['추천일자', '종목코드', '종목명', '종합점수', '현재가', '52주고가', '52주저가', '거래량']
 
-    # [수정] AI 의견 추가
-    print("Step 5: Gemini AI 분석 의견 생성 중...")
-    output_df['AI분석의견'] = get_ai_opinion(output_df)
+    # 2. [추가] Gemini 2.5 Flash-Lite 분석 호출
+    print("Step 5: Gemini 2.5 Flash-Lite AI 분석 의견 생성 중...")
+    output_df['AI 분석 의견'] = get_ai_opinion(output_df)
 
-    # [수정] 결과 시트 업데이트 (컬럼이 늘어났으므로 확인 필요)
+    # 3. 구글 시트 저장 및 이메일 전송 로직 수행
     result_ws = get_worksheet("종목추천")
     if not result_ws.get_all_values():
         result_ws.append_row(output_df.columns.tolist())
-    
     result_ws.append_rows(output_df.values.tolist())
     
     # [수정] 메일 본문용 HTML 표 생성 (너비 조절 추가)
