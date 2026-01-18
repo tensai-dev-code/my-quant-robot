@@ -25,6 +25,8 @@ jobs:
         run: pip install finance-datareader gspread oauth2client pandas
       - name: Run Script
         env:
+          # 왼쪽(GCP_SERVICE_ACCOUNT)은 파이썬이 os.environ.get으로 부를 이름
+          # 오른쪽(secrets.GCP_SERVICE_ACCOUNT)은 GitHub에 저장한 시크릿 이름
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python run_bot.py ${{ github.event.inputs.job }}
