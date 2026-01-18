@@ -8,21 +8,19 @@ from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime, timedelta
 
 
-# 1. 환경 변수 로드
-raw_json = os.environ.get('GCP_SERVICE_ACCOUNT') 
-if not raw_json:
-    raw_json = os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
-
+# 1. 환경 변수 로드 (공백 및 줄바꿈 정리 버전)
+raw_json = os.environ.get('GCP_SERVICE_ACCOUNT') or os.environ.get('GOOGLE_SERVICE_ACCOUNT_JSON')
 SPREADSHEET_ID = os.environ.get('SPREADSHEET_ID')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 
 if not raw_json or not SPREADSHEET_ID:
-    print("에러: 환경 변수(Secrets) 설정 확인이 필요합니다.")
+    print("에러: 환경 변수(GCP_SERVICE_ACCOUNT, SPREADSHEET_ID) 설정 확인이 필요합니다.")
     sys.exit(1)
 
 try:
     SERVICE_ACCOUNT_INFO = json.loads(raw_json)
 except json.JSONDecodeError:
-    print("에러: JSON 형식이 올바르지 않습니다.")
+    print("에러: JSON 형식이 올바르지 않습니다. Secrets 설정을 확인하세요.")
     sys.exit(1)
 
 # 2. 구글 시트 연결 함수
@@ -73,24 +71,20 @@ def update_quant_target():
 # 5. 주가 데이터 누적 수집
 def update_yearly_data(is_append=False):
     target_ws = get_worksheet("수집대상")
-    
-    # [수정] 퀀트대상에서 시가총액(Marcap) 정보를 미리 가져옴
     quant_ws = get_worksheet("퀀트대상")
     df_quant = pd.DataFrame(quant_ws.get_all_records())
     
-    # 딕셔너리로 코드별 이름과 시총 보관
     code_to_name = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Name']))
     code_to_marcap = dict(zip(df_quant['Code'].astype(str).str.zfill(6), df_quant['Marcap']))
     target_codes = list(code_to_name.keys())
 
+    # [중복 방지] 기존 데이터의 키 추출
+    existing_keys = set()
     if is_append:
         existing_data = target_ws.get_all_records()
-        if existing_data:
-            last_date = max([str(row['Date']) for row in existing_data])
-            today_str = datetime.now().strftime('%Y-%m-%d')
-            if last_date >= today_str:
-                print(f"이미 {last_date}까지 데이터가 존재합니다. 건너뜁니다.")
-                return
+        for row in existing_data:
+            # 날짜와 코드를 조합해 고유 키 생성
+            existing_keys.add(f"{row['Date']}_{str(row['Code']).zfill(6)}")
 
     days = 3 if is_append else 365
     end_date = datetime.now().strftime('%Y-%m-%d')
@@ -101,26 +95,32 @@ def update_yearly_data(is_append=False):
         try:
             df_hist = fdr.DataReader(code, start_date, end_date).reset_index()
             if not df_hist.empty:
-                df_hist['Code'] = code
+                df_hist['Code'] = code.zfill(6)
                 df_hist['Name'] = code_to_name[code]
-                # [추가] 시가총액 정보 추가
                 df_hist['Marcap'] = code_to_marcap.get(code, 0)
-                all_history.append(df_hist)
+                df_hist['Date'] = df_hist['Date'].dt.strftime('%Y-%m-%d')
+                
+                # 중복 제거 필터링
+                df_hist['key'] = df_hist['Date'] + "_" + df_hist['Code']
+                df_hist = df_hist[~df_hist['key'].isin(existing_keys)]
+                
+                if not df_hist.empty:
+                    df_hist = df_hist.drop(columns=['key'])
+                    all_history.append(df_hist)
         except: continue
 
     if all_history:
         final_df = pd.concat(all_history, ignore_index=True)
-        if 'Date' in final_df.columns:
-            final_df['Date'] = final_df['Date'].dt.strftime('%Y-%m-%d')
         final_df = final_df.fillna('')
-
         new_data = final_df.values.tolist()
+
         if not is_append:
             target_ws.clear()
             target_ws.update([final_df.columns.values.tolist()] + new_data)
         else:
             target_ws.append_rows(new_data)
-        print(f"성공: '수집대상' {len(new_data)}건 업데이트 완료.")
+        return True
+    return False
 
 # 6. 신뢰도 높은 스코어링 기반 추천 로직
 def calculate_stock_score(row):
@@ -283,8 +283,11 @@ if __name__ == "__main__":
     if job == 'daily_full_process':
         update_all_stocks()
         update_quant_target()
-        update_yearly_data(is_append=True)
-        daily_recommend()
+        # 데이터가 새로 추가되었을 때만 추천 로직 실행
+        if update_yearly_data(is_append=True):
+            daily_recommend()
+        else:
+            print("새로운 주가 데이터가 없어 추천 공정을 건너뜁니다.")
     elif job == 'all_stocks': update_all_stocks()
     elif job == 'quant_target': update_quant_target()
     elif job == 'yearly_data': update_yearly_data(is_append=False)
