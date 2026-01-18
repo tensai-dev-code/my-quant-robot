@@ -24,24 +24,41 @@ def update_all_stocks():
     print("성공: '전체종목' 시트 업데이트 완료.")
 
 def update_quant_target():
-    print("Step 2: 퀀트 대상 추출 중...")
-    # '전체종목' 시트 데이터 기반 필터링
+    print("Step 2: 퀀트 대상 추출 시작...")
+    # '전체종목' 시트 데이터 불러오기
     all_ws = get_worksheet("전체종목")
     df = pd.DataFrame(all_ws.get_all_records())
     
-    # 퀀트 필터 예시: 시가총액 상위 200개 & 거래소(Market)가 KOSPI인 종목
-    # (본인의 퀀트 로직으로 아래 조건을 수정하세요)
-    quant_df = df[df['Market'] == 'KOSPI'].nlargest(200, 'MarCap')
+    # 데이터 전처리: 숫자형이어야 할 컬럼들을 강제로 변환 (쉼표 등 제거)
+    numeric_cols = ['Close', 'ChagesRatio', 'Volume', 'Amount', 'Marcap', 'Stocks']
+    for col in numeric_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # --- [퀀트 필터링 조건 설정] ---
     
+    # 1. 시가총액 하위 20% 및 초소형주 제외 (변동성 위험 방지)
+    #    통상적으로 시총 상위 20%~50% 내에서 고르는 것이 안정적입니다.
+    upper_marcap = df['Marcap'].quantile(0.8) # 상위 20% 기준선
+    
+    # 2. 필터링 조건 결합
+    quant_df = df[
+        (df['Marcap'] >= upper_marcap) &       # 시가총액 상위 20% 이내 (대형/중형주)
+        (df['Volume'] > 50000) &               # 일 거래량 5만 주 이상 (환금성 확보)
+        (df['Market'].isin(['KOSPI', 'KOSDAQ'])) & # 코넥스 제외
+        (~df['Name'].str.contains('스팩|제[0-9]+호|우$|우[A-C]$')) # 스팩주, 우선주 제외
+    ].copy()
+
+    # 3. 랭킹 부여 (예: 거래대금 상위 순으로 정렬)
+    #    단순 필터링 후 거래대금(Amount)이 높은 순서로 정렬하여 시장 주도주 포착
+    quant_df = quant_df.sort_values(by='Amount', ascending=False).head(100)
+    
+    # ------------------------------
+
     target_ws = get_worksheet("퀀트대상")
     target_ws.clear()
-    target_ws.update([quant_df.columns.values.tolist()] + quant_df.values.tolist())
-    print(f"성공: {len(quant_df)}개 종목 '퀀트대상' 시트 업데이트 완료.")
-
-if __name__ == "__main__":
-    job_type = sys.argv[1] if len(sys.argv) > 1 else 'all_stocks'
     
-    if job_type == 'all_stocks':
-        update_all_stocks()
-    elif job_type == 'quant_target':
-        update_quant_target()
+    if not quant_df.empty:
+        target_ws.update([quant_df.columns.values.tolist()] + quant_df.values.tolist())
+        print(f"성공: 필터링된 {len(quant_df)}개 종목을 '퀀트대상' 시트에 저장했습니다.")
+    else:
+        print("조건에 맞는 종목이 없습니다.")
