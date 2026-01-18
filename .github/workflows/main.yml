@@ -37,3 +37,18 @@ jobs:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         # 수동 실행 시에는 job 선택값을 사용하고, 자동 스케줄러(schedule) 실행 시에는 daily_full_process를 기본값으로 사용함
         run: python run_bot.py ${{ github.event.inputs.job || 'daily_full_process' }}
+        # [수정된 메일 발송 단계]
+      - name: Send Mail
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USER }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚀 오늘의 퀀트 추천 종목 리스트"
+          to: "본인의메일주소@naver.com"
+          from: "Quant Bot <${{ secrets.EMAIL_USER }}>"
+          # 파일(email_body.html) 내용을 본문으로 사용
+          html_body: file://email_body.html
+        
