@@ -3,6 +3,7 @@ import FinanceDataReader as fdr
 import gspread
 import pandas as pd
 from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime, timedelta
 
 # 1. 환경 변수 로드
 raw_json = os.environ.get('GCP_SERVICE_ACCOUNT') 
@@ -83,7 +84,62 @@ def update_quant_target():
     else:
         print("조건에 맞는 종목이 없습니다.")
 
-# 5. 메인 실행부
+def update_yearly_data():
+    print("Step 3: 퀀트 대상 종목의 1년치 주가 수집 시작...")
+    
+    # 1. '퀀트대상' 시트에서 종목 코드 가져오기
+    quant_ws = get_worksheet("퀀트대상")
+    quant_data = quant_ws.get_all_records()
+    
+    if not quant_data:
+        print("에러: '퀀트대상' 데이터가 없습니다.")
+        return
+
+    df_quant = pd.DataFrame(quant_data)
+    # 컬럼 이름이 'Code'인 것을 확인하세요 (FinanceDataReader 기본값)
+    target_codes = df_quant['Code'].astype(str).tolist()
+
+    # 2. 날짜 설정 (오늘 기준 1년 전)
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+    all_history = []
+    
+    print(f"{len(target_codes)}개 종목 수집 중...")
+    for code in target_codes:
+        try:
+            # 6자리 코드가 되도록 zfill(6) 처리
+            clean_code = code.zfill(6)
+            df_hist = fdr.DataReader(clean_code, start_date, end_date)
+            
+            if not df_hist.empty:
+                df_hist = df_hist.reset_index() # 날짜(Date)를 컬럼으로 변경
+                df_hist['Code'] = clean_code
+                # 데이터 양이 너무 많을 수 있으므로 필요한 컬럼만 선택 (옵션)
+                # df_hist = df_hist[['Date', 'Code', 'Open', 'High', 'Low', 'Close', 'Volume']]
+                all_history.append(df_hist)
+        except Exception as e:
+            print(f"종목코드 {code} 수집 중 오류: {e}")
+
+    # 3. 모든 데이터를 하나로 합치기
+    if all_history:
+        final_df = pd.concat(all_history, ignore_index=True)
+        final_df['Date'] = final_df['Date'].dt.strftime('%Y-%m-%d') # 날짜 형식 변환
+        final_df = final_df.fillna('')
+
+        # 4. '수집대상' 시트에 저장
+        # 데이터가 수만 줄이 될 수 있으므로 시트 용량 주의
+        target_ws = get_worksheet("수집대상")
+        target_ws.clear()
+        
+        # 구글 시트 업데이트 제한을 피하기 위해 리스트로 변환하여 전송
+        data_to_send = [final_df.columns.values.tolist()] + final_df.values.tolist()
+        target_ws.update(data_to_send)
+        print(f"성공: 총 {len(final_df)}행의 주가 데이터를 '수집대상' 시트에 저장했습니다.")
+    else:
+        print("수집된 데이터가 없습니다.")
+
+# 메인 실행부에 추가
 if __name__ == "__main__":
     job_type = sys.argv[1] if len(sys.argv) > 1 else 'all_stocks'
     
@@ -91,3 +147,5 @@ if __name__ == "__main__":
         update_all_stocks()
     elif job_type == 'quant_target':
         update_quant_target()
+    elif job_type == 'yearly_data': # 추가
+        update_yearly_data()
