@@ -23,8 +23,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python news_summarizer.py
       - name: Send Mail
-        # 파일이 생성되었는지 더 확실하게 체크
-        if: success()
+        # 파이썬 실행이 성공했고, news_body.html 파일이 실제로 존재할 때만 실행
+        if: success() && hashFiles('news_body.html') != ''
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: smtp.gmail.com
@@ -34,4 +34,4 @@ jobs:
           subject: "📰 오늘자 이커머스 뉴스 요약 보고서"
           to: "leedch@gabiacns.com"
           from: "AI News Curator"
-          html_body: file://news_body.html # 파일 경로 확인
+          html_body: file://news_body.html
