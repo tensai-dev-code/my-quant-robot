@@ -58,12 +58,17 @@ def call_gemini_ai(articles):
     for a in articles:
         article_text += f"- 제목: {a['title']}\n  링크: {a['link']}\n  날짜: {a['pubDate']}\n  키워드: {a['keyword']}\n\n"
 
+    # call_gemini_ai 함수 내의 prompt 부분 수정
     prompt = f"""
     당신은 이커머스 전문 뉴스 큐레이터입니다. 다음 뉴스 목록을 분석하여 그룹화된 리포트를 작성하세요.
+
     [작업 지침]
     1. 이커머스 관련 뉴스만 선별(광고 플랫폼 포함), 증시/종목 뉴스는 제외.
     2. 중복 뉴스 그룹화 및 핵심 내용 요약.
-    3. HTML 형식(중첩 리스트 <ul><li>)으로 작성. 링크는 <a> 태그 사용.
+    3. HTML 형식 (중첩 리스트 <ul><li>):
+       - 각 그룹의 제목은 <strong> 태그로 감싸주세요.
+       - 하위 리스트의 각 항목은 다음 형식을 반드시 지켜주세요:
+         <li><a href="기사링크">기사제목</a> - <span style="color: #666;">(발행시간)</span></li>
     4. 인사말 없이 <ul>로 시작해서 </ul>로 끝나는 본문만 응답하세요.
 
     [뉴스 목록]
