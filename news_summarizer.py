@@ -4,11 +4,17 @@ import requests
 import json
 from datetime import datetime, timedelta
 
-# 1. 환경 변수 설정
+# 1. 환경 변수 설정 및 체크
 NAVER_CLIENT_ID = os.environ.get('NAVER_CLIENT_ID')
 NAVER_CLIENT_SECRET = os.environ.get('NAVER_CLIENT_SECRET')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-RECIPIENT_EMAIL = "leedch@gabiacns.com"
+
+# 값이 없으면 프로그램 종료 (로그에 범인 표시)
+if not all([NAVER_CLIENT_ID, NAVER_CLIENT_SECRET, GEMINI_API_KEY]):
+    print(f"에러: 필수 환경변수가 누락되었습니다.")
+    print(f"NAVER_ID: {'OK' if NAVER_CLIENT_ID else 'MISSING'}")
+    print(f"GEMINI_KEY: {'OK' if GEMINI_API_KEY else 'MISSING'}")
+    sys.exit(1) # 에러를 내며 종료시켜서 파일 미생성 문제를 방지
 
 KEYWORDS = ['지마켓', '11번가', '아임웹', '쿠팡', '카페24', '고도몰', '메이크샵', '네이버', '카카오', '메타', '인스타그램', '구글', '유튜브', '롯데온']
 
