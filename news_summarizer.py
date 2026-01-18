@@ -20,6 +20,7 @@ KEYWORDS = ['지마켓', '11번가', '아임웹', '쿠팡', '카페24', '고도�
 
 def get_naver_news():
     all_articles = []
+    # 현재 시간으로부터 정확히 24시간 전 설정
     one_day_ago = datetime.now() - timedelta(days=1)
     
     headers = {
@@ -27,24 +28,32 @@ def get_naver_news():
         'X-Naver-Client-Secret': NAVER_CLIENT_SECRET
     }
 
+    # 1. 중복 제거를 위한 set 준비 (URL 기준)
+    seen_links = set()
+
     for keyword in KEYWORDS:
-        url = f"https://openapi.naver.com/v1/search/news.json?query={keyword}&display=10&sort=date"
+        # 검색 품질을 높이기 위해 키워드에 "이커머스" 등을 조합하면 더 좋습니다.
+        url = f"https://openapi.naver.com/v1/search/news.json?query={keyword}&display=20&sort=date"
         try:
             response = requests.get(url, headers=headers)
             if response.status_code == 200:
                 items = response.json().get('items', [])
                 for item in items:
-                    # 네이버 날짜 형식 변환: "Mon, 06 Jan 2025 14:30:00 +0900"
                     pub_date = datetime.strptime(item['pubDate'], '%a, %d %b %Y %H:%M:%S +0900')
                     
+                    # 2. 24시간 이내 뉴스인지 확인
                     if pub_date >= one_day_ago:
-                        title = item['title'].replace('<b>', '').replace('</b>', '').replace('&quot;', '"')
-                        all_articles.append({
-                            'title': title,
-                            'link': item['link'],
-                            'pubDate': pub_date.strftime('%Y-%m-%d %H:%M'),
-                            'keyword': keyword
-                        })
+                        link = item['link']
+                        # 3. 여러 키워드에서 중복으로 수집된 기사 제외
+                        if link not in seen_links:
+                            seen_links.add(link)
+                            title = item['title'].replace('<b>', '').replace('</b>', '').replace('&quot;', '"').replace('&amp;', '&')
+                            all_articles.append({
+                                'title': title,
+                                'link': link,
+                                'pubDate': pub_date.strftime('%Y-%m-%d %H:%M'),
+                                'keyword': keyword
+                            })
         except Exception as e:
             print(f"{keyword} 검색 중 오류: {e}")
             
