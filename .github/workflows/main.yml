@@ -30,13 +30,16 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install dependencies
-        run: pip install finance-datareader gspread oauth2client pandas
+        run: |
+          pip install finance-datareader gspread oauth2client pandas google-generativeai
+
       - name: Run Script
         env:
           GCP_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-        # 수동 실행 시에는 job 선택값을 사용하고, 자동 스케줄러(schedule) 실행 시에는 daily_full_process를 기본값으로 사용함
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}  # AI 키 추가
         run: python run_bot.py ${{ github.event.inputs.job || 'daily_full_process' }}
+        
         # [수정된 메일 발송 단계]
       - name: Send Mail
         if: success()
