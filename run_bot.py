@@ -203,6 +203,28 @@ def daily_recommend():
     result_ws.append_rows(output_df.values.tolist())
     print(f"성공: {datetime.now().strftime('%Y-%m-%d')} 추천 완료.")
 
+    # [추가] 메일 본문용 HTML 표 생성
+    html_table = output_df.to_html(index=False, justify='center', border=1)
+    
+    # 이메일 본문 구성 (HTML)
+    email_body = f"""
+    <html>
+    <body>
+        <h3 style="color: #2e6c80;">🚀 오늘의 퀀트 추천 종목 (스코어 기반)</h3>
+        <p>52주 최저가 근접도와 우량도 스코어를 종합하여 선정된 종목입니다.</p>
+        {html_table}
+        <br>
+        <p>※ 자세한 분석 데이터는 <a href="https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}">구글 스프레드시트</a>를 확인하세요.</p>
+    </body>
+    </html>
+    """
+    
+    # 메일 본문을 별도의 파일로 저장
+    with open("email_body.html", "w", encoding="utf-8") as f:
+        f.write(email_body)
+    
+    print("메일 본문용 HTML 파일 저장 완료.")
+
 # 7. 메인 실행부
 if __name__ == "__main__":
     job = sys.argv[1] if len(sys.argv) > 1 else 'daily_full_process'
