@@ -70,17 +70,30 @@ def call_gemini_ai(articles):
     {article_text}
     """
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    model_name = "gemini-2.5-flash-lite" 
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
     try:
         res = requests.post(url, json=payload)
         result = res.json()
         
-        # 에러 체크 로직 추가
-        if 'candidates' not in result:
-            print(f"API 응답 에러: {result}")
+        if 'error' in result:
+            print(f"Gemini API 에러 발생: {result['error']['message']}")
             return None
+            
+        if 'candidates' not in result or not result['candidates']:
+            print(f"Gemini API 응답 구조 이상: {result}")
+            return None
+
+        content = result['candidates'][0]['content']['parts'][0]['text']
+        # 마크다운 태그 제거
+        clean_content = content.replace('```html', '').replace('```', '').strip()
+        return clean_content
+    except Exception as e:
+        print(f"Gemini API 호출 중 예외 발생: {e}")
+        return None
             
         content = result['candidates'][0]['content']['parts'][0]['text']
         
