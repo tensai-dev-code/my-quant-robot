@@ -112,15 +112,23 @@ def update_yearly_data(is_append=False):
 
     if all_history:
         final_df = pd.concat(all_history, ignore_index=True)
-        # 중복 제거 (데이터 프레임 내에서 한 번 더 체크)
-        final_df = final_df.drop_duplicates(['Date', 'Code'])
         
+        # [핵심 수정] 모든 날짜 컬럼을 문자열로 변환 (JSON 에러 방지)
+        if 'Date' in final_df.columns:
+            final_df['Date'] = final_df['Date'].dt.strftime('%Y-%m-%d')
+            
+        final_df = final_df.fillna('') # NaN 제거
+
+        target_ws = get_worksheet("수집대상")
         new_data = final_df.values.tolist()
+        
         if not is_append:
             target_ws.clear()
             target_ws.update([final_df.columns.values.tolist()] + new_data)
         else:
+            # append_rows를 사용할 때도 리스트 내의 모든 요소는 문자/숫자여야 함
             target_ws.append_rows(new_data)
+        print(f"성공: '수집대상' {len(new_data)}건 업데이트 완료.")
 
 
 def daily_recommend():
@@ -162,7 +170,13 @@ def daily_recommend():
     
     # 저장할 컬럼 순서 정의 (제목/헤더 포함)
     final_cols = ['Recommend_Date', 'Code', 'Name', 'Close', 'Min_52Week', 'Recovery_Rate', 'Volume']
+    # [핵심 수정] 추천 일자 등 날짜 관련 데이터를 문자열로 확실히 변환
     recommend_final = recommend_5[final_cols].copy()
+
+    # 만약에 결과에 Timestamp가 섞여있을 수 있으므로 전체 변환
+    for col in recommend_final.columns:
+        if pd.api.types.is_datetime64_any_dtype(recommend_final[col]):
+            recommend_final[col] = recommend_final[col].dt.strftime('%Y-%m-%d')
     
     # 컬럼명 한글로 변경 (시트 가독성용)
     recommend_final.columns = ['추천일자', '종목코드', '종목명', '현재가', '52주최저가', '최저가대비비율', '거래량']
