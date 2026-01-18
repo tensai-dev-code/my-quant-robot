@@ -11,6 +11,7 @@ on:
         options:
           - all_stocks
           - quant_target
+          - yearly_data
 
 jobs:
   execute:
@@ -25,7 +26,7 @@ jobs:
         run: pip install finance-datareader gspread oauth2client pandas
       - name: Run Script
         env:
-          # 시크릿 이름을 실제 등록하신 GOOGLE_SERVICE_ACCOUNT_JSON으로 변경
           GCP_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: python run_bot.py ${{ github.event.inputs.job }}
+        # options에 yearly_data가 추가된 상태여야 합니다.
